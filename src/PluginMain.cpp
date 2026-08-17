@@ -107,7 +107,7 @@ static INT_PTR CALLBACK PasswordDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
     case WM_INITDIALOG: {
         // Set tag count label
         TCHAR label[128];
-        _stprintf_s(label, _T("Найдено зашифрованных тегов: %d"), g_dlgTagCount);
+        _stprintf_s(label, _T("Encrypted tags found: %d"), g_dlgTagCount);
         SetDlgItemText(hDlg, IDC_TAG_COUNT_LABEL, label);
 
         // Default to LOCAL mode
@@ -161,7 +161,7 @@ void cmdEncryptSelection() {
     std::string selected = GetSelectedText();
     if (selected.empty()) {
         MessageBox(g_nppData._nppHandle,
-            _T("Выделите текст для шифрования."),
+            _T("Select text to encrypt."),
             PLUGIN_NAME, MB_OK | MB_ICONINFORMATION);
         return;
     }
@@ -169,7 +169,7 @@ void cmdEncryptSelection() {
     // Check if user is trying to encrypt an already encrypted tag
     if (TagParser::IsEncryptedTag(selected)) {
         int answer = MessageBox(g_nppData._nppHandle,
-            _T("Выделенный текст уже является зашифрованным тегом.\nЗашифровать повторно?"),
+            _T("Selected text is already an encrypted tag.\nEncrypt again?"),
             PLUGIN_NAME, MB_YESNO | MB_ICONQUESTION);
         if (answer != IDYES) return;
     }
@@ -204,7 +204,7 @@ void cmdDecryptAll() {
     auto tags = TagParser::FindTags(text);
     if (tags.empty()) {
         MessageBox(g_nppData._nppHandle,
-            _T("Зашифрованных тегов не найдено."),
+            _T("No encrypted tags found."),
             PLUGIN_NAME, MB_OK | MB_ICONINFORMATION);
         return;
     }
@@ -254,7 +254,7 @@ void cmdDecryptAll() {
 
     // Status bar update
     TCHAR status[128];
-    _stprintf_s(status, _T("EncTags: расшифровано %d тегов"), g_registry.Count());
+    _stprintf_s(status, _T("EncTags: %d tags decrypted"), g_registry.Count());
     ::SendMessage(g_nppData._nppHandle, NPPM_SETSTATUSBAR, STATUSBAR_DOC_TYPE, (LPARAM)status);
 }
 
@@ -265,7 +265,7 @@ void cmdDecryptAll() {
 void cmdLockAll() {
     if (!g_isDecrypted || g_registry.Count() == 0) {
         MessageBox(g_nppData._nppHandle,
-            _T("Нет расшифрованных тегов."),
+            _T("No decrypted tags."),
             PLUGIN_NAME, MB_OK | MB_ICONINFORMATION);
         return;
     }
@@ -316,7 +316,7 @@ void cmdLockAll() {
     g_isDecrypted = false;
 
     ::SendMessage(g_nppData._nppHandle, NPPM_SETSTATUSBAR, STATUSBAR_DOC_TYPE,
-                  (LPARAM)_T("EncTags: все теги зашифрованы"));
+                  (LPARAM)_T("EncTags: all tags encrypted"));
 }
 
 // ============================================================
@@ -326,7 +326,7 @@ void cmdLockAll() {
 void cmdRemoveEncryption() {
     if (!g_isDecrypted) {
         MessageBox(g_nppData._nppHandle,
-            _T("Сначала расшифруйте теги (Decrypt All)."),
+            _T("Decrypt tags first (Decrypt All)."),
             PLUGIN_NAME, MB_OK | MB_ICONINFORMATION);
         return;
     }
@@ -337,7 +337,7 @@ void cmdRemoveEncryption() {
     int idx = g_registry.FindAt(curPos);
     if (idx < 0) {
         MessageBox(g_nppData._nppHandle,
-            _T("Курсор не находится внутри зашифрованного фрагмента."),
+            _T("Cursor is not inside an encrypted fragment."),
             PLUGIN_NAME, MB_OK | MB_ICONINFORMATION);
         return;
     }
@@ -352,7 +352,7 @@ void cmdRemoveEncryption() {
     g_registry.Remove(idx);
 
     MessageBox(g_nppData._nppHandle,
-        _T("Шифрование снято. Текст останется как есть при сохранении."),
+        _T("Encryption removed. Text will stay as plain text on save."),
         PLUGIN_NAME, MB_OK | MB_ICONINFORMATION);
 }
 
@@ -363,8 +363,8 @@ void cmdRemoveEncryption() {
 void cmdAbout() {
     MessageBox(g_nppData._nppHandle,
         _T("EncTags v0.1.0\n\n")
-        _T("Шифрование фрагментов текста внутри файлов\n")
-        _T("с помощью тегов ^^...^^\n\n")
+        _T("Encrypts fragments of text inside files\n")
+        _T("using ^^...^^ tags\n\n")
         _T("AES-256-GCM + PBKDF2-SHA256\n\n")
         _T("https://github.com/enctags"),
         _T("About EncTags"), MB_OK | MB_ICONINFORMATION);
@@ -460,31 +460,31 @@ extern "C" __declspec(dllexport) FuncItem* getFuncsArray(int* nbF) {
     // Shortcut: Ctrl+Shift+L for Lock
     static ShortcutKey skLock    = { true, false, true, 'L' };
 
-    _tcscpy_s(g_funcItems[0]._itemName, _T("Зашифровать выделение"));
+    _tcscpy_s(g_funcItems[0]._itemName, _T("Encrypt Selection"));
     g_funcItems[0]._pFunc     = (PFUNCSETINFO)cmdEncryptSelection;
     g_funcItems[0]._cmdID     = 0;
     g_funcItems[0]._init2Check = false;
     g_funcItems[0]._pShKey    = &skEncrypt;
 
-    _tcscpy_s(g_funcItems[1]._itemName, _T("Расшифровать всё"));
+    _tcscpy_s(g_funcItems[1]._itemName, _T("Decrypt All"));
     g_funcItems[1]._pFunc     = (PFUNCSETINFO)cmdDecryptAll;
     g_funcItems[1]._cmdID     = 0;
     g_funcItems[1]._init2Check = false;
     g_funcItems[1]._pShKey    = &skDecrypt;
 
-    _tcscpy_s(g_funcItems[2]._itemName, _T("Зашифровать обратно"));
+    _tcscpy_s(g_funcItems[2]._itemName, _T("Lock (Re-encrypt)"));
     g_funcItems[2]._pFunc     = (PFUNCSETINFO)cmdLockAll;
     g_funcItems[2]._cmdID     = 0;
     g_funcItems[2]._init2Check = false;
     g_funcItems[2]._pShKey    = &skLock;
 
-    _tcscpy_s(g_funcItems[3]._itemName, _T("Снять шифрование"));
+    _tcscpy_s(g_funcItems[3]._itemName, _T("Remove Encryption"));
     g_funcItems[3]._pFunc     = (PFUNCSETINFO)cmdRemoveEncryption;
     g_funcItems[3]._cmdID     = 0;
     g_funcItems[3]._init2Check = false;
     g_funcItems[3]._pShKey    = NULL;
 
-    _tcscpy_s(g_funcItems[4]._itemName, _T("О плагине..."));
+    _tcscpy_s(g_funcItems[4]._itemName, _T("About..."));
     g_funcItems[4]._pFunc     = (PFUNCSETINFO)cmdAbout;
     g_funcItems[4]._cmdID     = 0;
     g_funcItems[4]._init2Check = false;
