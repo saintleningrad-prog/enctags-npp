@@ -1,0 +1,16 @@
+#include <windows.h>
+#include "resource.h"
+
+IDD_PASSWORD_DLG DIALOGEX 0, 0, 260, 100
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "EncTags"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    LTEXT           "Найдено зашифрованных тегов:", IDC_TAG_COUNT_LABEL, 14, 10, 230, 10
+    LTEXT           "Пароль:", IDC_PASSWORD_LABEL, 14, 30, 40, 10
+    EDITTEXT        IDC_PASSWORD_EDIT, 60, 28, 180, 14, ES_PASSWORD | ES_AUTOHSCROLL
+    CONTROL         "LOCAL (только пароль)", IDC_MODE_LOCAL, "Button", BS_AUTORADIOBUTTON | WS_GROUP, 14, 52, 120, 10
+    CONTROL         "OPRF (пароль + сервис)", IDC_MODE_OPRF, "Button", BS_AUTORADIOBUTTON, 14, 66, 120, 10
+    DEFPUSHBUTTON   "OK", IDOK, 140, 78, 50, 14
+    PUSHBUTTON      "Отмена", IDCANCEL, 196, 78, 50, 14
+END

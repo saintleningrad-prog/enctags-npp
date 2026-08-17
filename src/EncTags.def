@@ -1,0 +1,8 @@
+LIBRARY EncTags
+EXPORTS
+    isUnicode
+    setInfo
+    getName
+    getFuncsArray
+    beNotified
+    messageProc
