@@ -33,15 +33,14 @@ std::string Base64Encode(const std::vector<uint8_t>& data) {
 }
 
 std::vector<uint8_t> Base64Decode(const std::string& encoded) {
-    static const int T[256] = { [0 ... 255] = -1 };  // Not valid C++
-    // Manual lookup table
-    std::vector<int> lut(256, -1);
-    for (int i = 0; i < 64; i++)
-        lut[(unsigned char)b64chars[i]] = i;
+    int lut[256];
+    for (int i = 0; i < 256; i++) lut[i] = -1;
+    for (int i = 0; i < 64; i++) lut[(unsigned char)b64chars[i]] = i;
 
     std::vector<uint8_t> out;
     int val = 0, valb = -8;
-    for (unsigned char c : encoded) {
+    for (size_t idx = 0; idx < encoded.size(); idx++) {
+        unsigned char c = (unsigned char)encoded[idx];
         if (lut[c] == -1) break;
         val = (val << 6) + lut[c];
         valb += 6;
