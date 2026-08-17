@@ -2,14 +2,9 @@
 #include <sstream>
 #include <algorithm>
 
-// Windows BCrypt status check
 #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
 
 namespace EncTagsEngine {
-
-// ============================================================
-//  Base64 encode/decode (RFC 4648, no padding trimming)
-// ============================================================
 
 static const char b64chars[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -17,8 +12,8 @@ static const char b64chars[] =
 std::string Base64Encode(const std::vector<uint8_t>& data) {
     std::string out;
     int val = 0, valb = -6;
-    for (uint8_t c : data) {
-        val = (val << 8) + c;
+    for (size_t i = 0; i < data.size(); i++) {
+        val = (val << 8) + data[i];
         valb += 8;
         while (valb >= 0) {
             out.push_back(b64chars[(val >> valb) & 0x3F]);
@@ -39,8 +34,8 @@ std::vector<uint8_t> Base64Decode(const std::string& encoded) {
 
     std::vector<uint8_t> out;
     int val = 0, valb = -8;
-    for (size_t idx = 0; idx < encoded.size(); idx++) {
-        unsigned char c = (unsigned char)encoded[idx];
+    for (size_t i = 0; i < encoded.size(); i++) {
+        unsigned char c = (unsigned char)encoded[i];
         if (lut[c] == -1) break;
         val = (val << 6) + lut[c];
         valb += 6;
@@ -52,19 +47,11 @@ std::vector<uint8_t> Base64Decode(const std::string& encoded) {
     return out;
 }
 
-// ============================================================
-//  Random bytes via BCryptGenRandom
-// ============================================================
-
 std::vector<uint8_t> RandomBytes(int count) {
     std::vector<uint8_t> buf(count);
     BCryptGenRandom(NULL, buf.data(), (ULONG)count, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
     return buf;
 }
-
-// ============================================================
-//  PBKDF2-SHA256 key derivation
-// ============================================================
 
 std::vector<uint8_t> DeriveKey(const std::string& password,
                                 const std::vector<uint8_t>& salt) {
@@ -90,10 +77,6 @@ std::vector<uint8_t> DeriveKey(const std::string& password,
     return derivedKey;
 }
 
-// ============================================================
-//  AES-256-GCM encrypt
-// ============================================================
-
 bool AesGcmEncrypt(const std::vector<uint8_t>& key,
                    const std::vector<uint8_t>& nonce,
                    const std::vector<uint8_t>& plaintext,
@@ -110,11 +93,11 @@ bool AesGcmEncrypt(const std::vector<uint8_t>& key,
 
     status = BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE,
         (PUCHAR)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0);
-    if (!NT_SUCCESS(status)) goto cleanup;
+    if (!NT_SUCCESS(status)) { BCryptCloseAlgorithmProvider(hAlg, 0); return false; }
 
     status = BCryptGenerateSymmetricKey(hAlg, &hKey, NULL, 0,
         (PUCHAR)key.data(), (ULONG)key.size(), 0);
-    if (!NT_SUCCESS(status)) goto cleanup;
+    if (!NT_SUCCESS(status)) { BCryptCloseAlgorithmProvider(hAlg, 0); return false; }
 
     {
         BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo;
@@ -132,7 +115,7 @@ bool AesGcmEncrypt(const std::vector<uint8_t>& key,
         status = BCryptEncrypt(hKey,
             (PUCHAR)plaintext.data(), (ULONG)plaintext.size(),
             &authInfo,
-            NULL, 0,  // no IV separate from nonce in GCM
+            NULL, 0,
             ciphertext.data(), (ULONG)ciphertext.size(),
             &cbResult, 0);
 
@@ -142,15 +125,10 @@ bool AesGcmEncrypt(const std::vector<uint8_t>& key,
         }
     }
 
-cleanup:
     if (hKey) BCryptDestroyKey(hKey);
     if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
     return ok;
 }
-
-// ============================================================
-//  AES-256-GCM decrypt
-// ============================================================
 
 bool AesGcmDecrypt(const std::vector<uint8_t>& key,
                    const std::vector<uint8_t>& nonce,
@@ -168,11 +146,11 @@ bool AesGcmDecrypt(const std::vector<uint8_t>& key,
 
     status = BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE,
         (PUCHAR)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0);
-    if (!NT_SUCCESS(status)) goto cleanup;
+    if (!NT_SUCCESS(status)) { BCryptCloseAlgorithmProvider(hAlg, 0); return false; }
 
     status = BCryptGenerateSymmetricKey(hAlg, &hKey, NULL, 0,
         (PUCHAR)key.data(), (ULONG)key.size(), 0);
-    if (!NT_SUCCESS(status)) goto cleanup;
+    if (!NT_SUCCESS(status)) { BCryptCloseAlgorithmProvider(hAlg, 0); return false; }
 
     {
         BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo;
@@ -198,31 +176,24 @@ bool AesGcmDecrypt(const std::vector<uint8_t>& key,
         }
     }
 
-cleanup:
     if (hKey) BCryptDestroyKey(hKey);
     if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
     return ok;
 }
 
-// ============================================================
-//  High-level Encrypt: plaintext + password → ^^L1:...^^
-// ============================================================
-
 EncryptResult Encrypt(const std::string& plaintext, const std::string& password) {
-    EncryptResult result = { false, "", "" };
+    EncryptResult result;
+    result.success = false;
 
-    // Generate random salt and nonce
     auto salt  = RandomBytes(SALT_SIZE);
     auto nonce = RandomBytes(NONCE_SIZE);
 
-    // Derive key
     auto key = DeriveKey(password, salt);
     if (key.empty()) {
         result.error = "Key derivation failed";
         return result;
     }
 
-    // Encrypt
     std::vector<uint8_t> ct, tag;
     std::vector<uint8_t> pt(plaintext.begin(), plaintext.end());
 
@@ -231,63 +202,50 @@ EncryptResult Encrypt(const std::string& plaintext, const std::string& password)
         return result;
     }
 
-    // Combine: salt + nonce + ciphertext + authTag → single blob → base64
     std::vector<uint8_t> blob;
-    blob.insert(blob.end(), salt.begin(),  salt.end());    // 16 bytes
-    blob.insert(blob.end(), nonce.begin(), nonce.end());   // 12 bytes
-    blob.insert(blob.end(), ct.begin(),    ct.end());      // variable
-    blob.insert(blob.end(), tag.begin(),   tag.end());     // 16 bytes
+    blob.insert(blob.end(), salt.begin(),  salt.end());
+    blob.insert(blob.end(), nonce.begin(), nonce.end());
+    blob.insert(blob.end(), ct.begin(),    ct.end());
+    blob.insert(blob.end(), tag.begin(),   tag.end());
 
     std::string b64 = Base64Encode(blob);
 
-    // Format: ^^L1:base64^^
     result.tag = "^^L1:" + b64 + "^^";
     result.success = true;
     return result;
 }
 
-// ============================================================
-//  High-level Decrypt: tag payload → plaintext
-// ============================================================
-
 DecryptResult Decrypt(const std::string& tagPayload, const std::string& password) {
-    DecryptResult result = { false, "", "" };
+    DecryptResult result;
+    result.success = false;
 
-    // tagPayload is "L1:base64data"
-    // Parse mode and version
     if (tagPayload.size() < 4 || tagPayload[0] != 'L' || tagPayload[1] != '1' || tagPayload[2] != ':') {
-        result.error = "Unknown tag format (expected L1:...)";
+        result.error = "Unknown tag format";
         return result;
     }
 
-    std::string b64data = tagPayload.substr(3);  // everything after "L1:"
-
-    // Decode base64
+    std::string b64data = tagPayload.substr(3);
     auto blob = Base64Decode(b64data);
 
-    // Minimum: salt(16) + nonce(12) + authTag(16) = 44 bytes + at least 1 byte ciphertext
-    if (blob.size() < SALT_SIZE + NONCE_SIZE + TAG_SIZE + 1) {
+    if (blob.size() < (size_t)(SALT_SIZE + NONCE_SIZE + TAG_SIZE + 1)) {
         result.error = "Tag data too short";
         return result;
     }
 
-    // Extract parts
     std::vector<uint8_t> salt(blob.begin(), blob.begin() + SALT_SIZE);
     std::vector<uint8_t> nonce(blob.begin() + SALT_SIZE, blob.begin() + SALT_SIZE + NONCE_SIZE);
     std::vector<uint8_t> authTag(blob.end() - TAG_SIZE, blob.end());
     std::vector<uint8_t> ct(blob.begin() + SALT_SIZE + NONCE_SIZE, blob.end() - TAG_SIZE);
 
-    // Derive key
     auto key = DeriveKey(password, salt);
     if (key.empty()) {
         result.error = "Key derivation failed";
         return result;
     }
 
-    // Decrypt
     std::vector<uint8_t> pt;
     if (!AesGcmDecrypt(key, nonce, ct, authTag, pt)) {
-        result.error = "Decryption failed (wrong password or corrupted data)";
+        result.error = "Wrong password or corrupted data";
         return result;
     }
 
