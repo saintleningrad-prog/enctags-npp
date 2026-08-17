@@ -1,0 +1,21 @@
+name: Build EncTags Plugin
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: microsoft/setup-msbuild@v2
+
+    - run: msbuild EncTags.sln /p:Configuration=Release /p:Platform=x64
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: EncTags-x64
+        path: x64/Release/EncTags.dll
