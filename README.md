@@ -1,13 +1,13 @@
 # EncTags for Notepad++
 
-Encrypt sensitive fragments of text inline, right inside your source files — without touching the rest of the file.
+Encrypt sensitive fragments of text inline, right inside any file — code, config, markdown, plain text — without touching the rest of the file.
 
 ```
-// TODO: prod DB password is hunter2
+TODO: prod DB password is hunter2
 ```
 becomes
 ```
-// ^^L1:c2FsdA==f8x9K3mN2pQ7rL4wYz1sT6vU9bC5dE8gH...^^
+^^L1:c2FsdA==f8x9K3mN2pQ7rL4wYz1sT6vU9bC5dE8gH...^^
 ```
 
 No plugin, no password → just a harmless-looking string. With the plugin and the right password → the original text, right where it was.
@@ -16,9 +16,9 @@ No plugin, no password → just a harmless-looking string. With the plugin and t
 
 ## Why
 
-Developers routinely leave sensitive notes in source comments — internal API keys, business logic details, credentials for test environments. These end up in git history, get exposed during audits, and are visible to every contractor or new hire with repo access.
+People leave sensitive notes in all kinds of text files — source comments, `.env`-style configs, personal notes, README drafts — internal API keys, business details, credentials for test environments. These end up in git history, get exposed during audits, and are visible to every contractor or new hire with repo access.
 
-EncTags lets you keep the note in place, encrypted, so the file stays functional and the comment stays hidden from anyone without the password.
+EncTags lets you keep the note in place, encrypted, so the file stays functional (or just readable) and the fragment stays hidden from anyone without the password.
 
 ## How it works
 
