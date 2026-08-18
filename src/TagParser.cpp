@@ -1,33 +1,93 @@
-#pragma once
-#include <string>
-#include <vector>
+#include "TagParser.h"
 
 namespace TagParser {
 
-    // A found ^^...^^ region in the text — may be encrypted or raw
-    struct FoundTag {
-        int startPos;        // Position of first ^ in ^^
-        int endPos;           // Position after last ^ in ^^
-        std::string payload;  // Everything between ^^ and ^^
-        bool isEncrypted;     // true = "L1:base64...", false = raw plaintext
-    };
+static const std::string DELIM = "^^";
 
-    // Find ALL ^^...^^ regions in text, classified as encrypted or raw
-    std::vector<FoundTag> FindAllTags(const std::string& text);
+std::vector<FoundTag> FindAllTags(const std::string& text) {
+    std::vector<FoundTag> tags;
+    size_t searchFrom = 0;
 
-    // Find only encrypted tags (^^L1:...^^)
-    std::vector<FoundTag> FindEncryptedTags(const std::string& text);
+    while (searchFrom < text.size()) {
+        size_t openPos = text.find(DELIM, searchFrom);
+        if (openPos == std::string::npos) break;
 
-    // Find only raw (not yet encrypted) tags (^^plain text^^)
-    std::vector<FoundTag> FindRawTags(const std::string& text);
+        size_t payloadStart = openPos + DELIM.size();
+        size_t closePos = text.find(DELIM, payloadStart);
+        if (closePos == std::string::npos) break;
 
-    // Validate a tag payload format (starts with L1: or O1: etc.)
-    bool IsValidPayload(const std::string& payload);
+        std::string payload = text.substr(payloadStart, closePos - payloadStart);
 
-    // Check if a string (with surrounding ^^) is an encrypted tag
-    bool IsEncryptedTag(const std::string& text);
+        // Skip empty tags (^^^^ with nothing between)
+        if (!payload.empty()) {
+            FoundTag tag;
+            tag.startPos    = (int)openPos;
+            tag.endPos      = (int)(closePos + DELIM.size());
+            tag.payload     = payload;
+            tag.isEncrypted = IsValidPayload(payload);
+            tags.push_back(tag);
+        }
 
-    // Find the tag (encrypted or raw) that contains the given cursor position.
-    // Returns index into the result vector, or -1 if cursor is not inside any tag.
-    int FindTagAtPosition(const std::vector<FoundTag>& tags, int pos);
+        searchFrom = closePos + DELIM.size();
+    }
+
+    return tags;
 }
+
+std::vector<FoundTag> FindEncryptedTags(const std::string& text) {
+    auto all = FindAllTags(text);
+    std::vector<FoundTag> result;
+    for (auto& t : all)
+        if (t.isEncrypted) result.push_back(t);
+    return result;
+}
+
+std::vector<FoundTag> FindRawTags(const std::string& text) {
+    auto all = FindAllTags(text);
+    std::vector<FoundTag> result;
+    for (auto& t : all)
+        if (!t.isEncrypted) result.push_back(t);
+    return result;
+}
+
+bool IsValidPayload(const std::string& payload) {
+    if (payload.size() < 4) return false;
+
+    char mode = payload[0];
+    char ver  = payload[1];
+    char sep  = payload[2];
+
+    if (mode != 'L' && mode != 'O' && mode != 'Q') return false;
+    if (ver != '1') return false;
+    if (sep != ':') return false;
+
+    for (size_t i = 3; i < payload.size(); i++) {
+        char c = payload[i];
+        bool valid = (c >= 'A' && c <= 'Z') ||
+                     (c >= 'a' && c <= 'z') ||
+                     (c >= '0' && c <= '9') ||
+                     c == '+' || c == '/' || c == '=';
+        if (!valid) return false;
+    }
+    return true;
+}
+
+bool IsEncryptedTag(const std::string& text) {
+    if (text.size() < 8) return false;
+    if (text.substr(0, 2) != "^^") return false;
+    if (text.substr(text.size() - 2) != "^^") return false;
+
+    std::string payload = text.substr(2, text.size() - 4);
+    return IsValidPayload(payload);
+}
+
+int FindTagAtPosition(const std::vector<FoundTag>& tags, int pos) {
+    for (int i = 0; i < (int)tags.size(); i++) {
+        if (pos >= tags[i].startPos && pos <= tags[i].endPos) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+} // namespace TagParser
