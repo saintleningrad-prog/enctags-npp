@@ -1,90 +1,106 @@
-# EncTags — Notepad++ Plugin
+# EncTags for Notepad++
 
-Шифрование фрагментов текста внутри файлов с помощью тегов `^^...^^`
-
-## Сборка
-
-### Требования
-- Visual Studio 2022 (Community подойдёт)
-- Windows SDK 10.0
-- Компонент "Разработка классических приложений C++"
-
-### Шаги
-1. Открыть `EncTags.sln` в Visual Studio
-2. Выбрать конфигурацию **Release | x64**
-3. Build → Build Solution (Ctrl+Shift+B)
-4. Готовый файл: `x64\Release\EncTags.dll`
-
-### Установка в Notepad++
-1. Создать папку: `<путь к Notepad++>\plugins\EncTags\`
-2. Скопировать `EncTags.dll` в эту папку
-3. Перезапустить Notepad++
-4. Меню: Plugins → EncTags
-
-## Использование
-
-### Шифрование
-1. Выделить текст
-2. `Ctrl+Shift+E` или Plugins → EncTags → Зашифровать выделение
-3. Ввести пароль
-4. Выделенный текст заменяется на `^^L1:base64data^^`
-
-### Расшифровка
-1. `Ctrl+Shift+D` или Plugins → EncTags → Расшифровать всё
-2. Ввести пароль
-3. Все теги `^^...^^` заменяются расшифрованным текстом
-4. Расшифрованные фрагменты подсвечиваются зелёным
-
-### Сохранение
-- При `Ctrl+S` плагин **автоматически** шифрует все расшифрованные фрагменты обратно
-- После сохранения — снова показывает расшифрованный текст
-
-### Блокировка
-- `Ctrl+Shift+L` — вручную зашифровать всё обратно без сохранения файла
-
-### Снятие шифрования
-- Поставить курсор внутрь расшифрованного фрагмента
-- Plugins → EncTags → Снять шифрование
-- При сохранении текст останется как есть (без шифрования)
-
-## Формат тега
+Encrypt sensitive fragments of text inline, right inside your source files — without touching the rest of the file.
 
 ```
-^^L1:<base64_blob>^^
+// TODO: prod DB password is hunter2
+```
+becomes
+```
+// ^^L1:c2FsdA==f8x9K3mN2pQ7rL4wYz1sT6vU9bC5dE8gH...^^
 ```
 
-Blob содержит (в бинарном виде, закодированном в base64):
-- Salt: 16 байт (PBKDF2)
-- Nonce: 12 байт (AES-GCM)
-- Ciphertext: переменная длина
-- Auth Tag: 16 байт (AES-GCM)
+No plugin, no password → just a harmless-looking string. With the plugin and the right password → the original text, right where it was.
 
-## Криптография
+---
 
-- **KDF:** PBKDF2-SHA256, 100 000 итераций
-- **Шифрование:** AES-256-GCM
-- **Реализация:** Windows BCrypt API (нулевые внешние зависимости)
+## Why
 
-## Структура проекта
+Developers routinely leave sensitive notes in source comments — internal API keys, business logic details, credentials for test environments. These end up in git history, get exposed during audits, and are visible to every contractor or new hire with repo access.
+
+EncTags lets you keep the note in place, encrypted, so the file stays functional and the comment stays hidden from anyone without the password.
+
+## How it works
+
+The plugin looks for `^^...^^` tags in your file.
+
+| You see | It means |
+|---|---|
+| `^^some text^^` | Not yet encrypted — select it and press the hotkey |
+| `^^L1:base64...^^` | Encrypted — put your cursor inside and press the hotkey |
+
+One hotkey, **Ctrl+Shift+E**, toggles whichever tag your cursor is on (or your current text selection):
+
+- Selected plain text → encrypted into a `^^L1:...^^` tag
+- Cursor inside a raw `^^text^^` tag → encrypted in place
+- Cursor inside an encrypted `^^L1:...^^` tag → decrypted, password prompt appears
+- Cursor inside already-decrypted text (this session) → re-encrypted with the same password
+
+The plugin does nothing automatically on file open, save, or close — every encryption/decryption is a deliberate action you trigger yourself.
+
+## Install
+
+1. Go to [Releases](../../releases) and download `EncTags.dll`
+2. Copy it to `<Notepad++ install folder>\plugins\EncTags\EncTags.dll`
+3. Restart Notepad++
+4. `Plugins → EncTags`
+
+## Cryptography
+
+- **Key derivation:** PBKDF2-HMAC-SHA256, 100,000 iterations
+- **Encryption:** AES-256-GCM (authenticated — tampering is detected, not just ignored)
+- **Implementation:** Windows CNG (`bcrypt.dll`) — no third-party crypto library, no external dependencies
+- Each encryption generates a fresh random salt and nonce — encrypting the same text twice with the same password produces different output
+
+## Format
+
+```
+^^L1:<base64>^^
+```
+
+The base64 blob decodes to: `salt (16 bytes) + nonce (12 bytes) + ciphertext + auth tag (16 bytes)`.
+
+The format is intentionally simple and openly specified, so it isn't locked to this plugin. Anything that implements PBKDF2-SHA256 + AES-256-GCM with the same parameters can decrypt an EncTags tag: a Python script, a browser extension, a CLI tool.
+
+## Building from source
+
+Requires Visual Studio 2022 with the "Desktop development with C++" workload.
+
+```
+git clone https://github.com/saintleningrad-prog/enctags-npp.git
+cd enctags-npp
+msbuild EncTags.sln /p:Configuration=Release /p:Platform=x64
+```
+
+Output: `x64\Release\EncTags.dll`
+
+Or push to `main` — GitHub Actions builds it automatically (see [`.github/workflows/build.yml`](.github/workflows/build.yml)).
+
+## Project structure
 
 ```
 enctags-npp/
-├── EncTags.sln              — Visual Studio solution
-├── EncTags.vcxproj          — Visual Studio project
-├── include/
-│   ├── PluginInterface.h    — Notepad++ plugin API
-│   └── Scintilla.h          — Scintilla messages
 ├── src/
-│   ├── PluginMain.cpp       — DLL entry, menu, notifications
-│   ├── EncTagsEngine.h/cpp  — AES-256-GCM + PBKDF2
-│   ├── TagParser.h/cpp      — поиск ^^...^^ в тексте
-│   ├── FragmentRegistry.h/cpp — реестр расшифрованных фрагментов
-│   ├── resource.h           — ID ресурсов
-│   ├── EncTags.rc           — диалог пароля
-│   └── EncTags.def          — DLL exports
-└── README.md
+│   ├── PluginMain.cpp          Plugin entry point, menu, hotkey logic
+│   ├── EncTagsEngine.h/.cpp    PBKDF2 + AES-256-GCM (Windows BCrypt)
+│   ├── TagParser.h/.cpp        Finds and classifies ^^...^^ tags
+│   ├── FragmentRegistry.h/.cpp Tracks decrypted fragments in the buffer
+│   ├── EncTags.rc              Password dialog resource
+│   └── EncTags.def             DLL export table
+├── include/
+│   ├── PluginInterface.h       Notepad++ plugin API
+│   └── Scintilla.h             Scintilla editor messages
+├── EncTags.sln / .vcxproj
+└── .github/workflows/build.yml
 ```
 
-## Лицензия
+## Roadmap
 
-MIT
+- [ ] VSCode extension (same tag format, same crypto)
+- [ ] Browser extension for reading tags in HTML source
+- [ ] CLI tool for scripting / CI use
+- [ ] Optional passphrase-strengthening service (OPRF-based, zero-knowledge)
+
+## License
+
+MIT — see [LICENSE](LICENSE)
