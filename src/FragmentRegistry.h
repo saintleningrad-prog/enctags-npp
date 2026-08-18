@@ -1,20 +1,18 @@
 #pragma once
 #include <string>
 #include <vector>
-#include <windows.h>
 
-// Tracks decrypted fragments in the editor buffer.
-// When a tag is decrypted and replaced with plaintext,
-// the registry remembers the original encrypted tag so it
-// can re-encrypt on save.
+// Tracks decrypted fragments currently shown as plaintext in the editor.
+// Each fragment remembers which password decrypted it, so re-encryption
+// on close/save can use the correct password per-fragment.
 
 struct ManagedFragment {
-    int    indicatorId;           // Scintilla indicator slot
-    std::string originalTag;     // "^^L1:salt:ct:tag^^" — for rollback
-    std::string decryptedText;   // Original decrypted text (to detect edits)
-    int    startPos;             // Start position in buffer
-    int    length;               // Length of decrypted text in buffer
-    bool   active;               // Still managed (false = user removed encryption)
+    std::string originalTag;      // "^^L1:salt:ct:tag^^" — for rollback if unchanged
+    std::string decryptedText;    // Text right after decryption (to detect user edits)
+    std::string password;         // Password that decrypted this fragment
+    int    startPos;              // Start position in current buffer
+    int    length;                // Length of decrypted text in buffer
+    bool   active;                // Still tracked (false = removed from tracking)
 };
 
 class FragmentRegistry {
@@ -22,30 +20,20 @@ public:
     FragmentRegistry();
     ~FragmentRegistry();
 
-    // Register a newly decrypted fragment
     void Add(int startPos, int length,
              const std::string& originalTag,
-             const std::string& decryptedText);
+             const std::string& decryptedText,
+             const std::string& password);
 
-    // Remove a fragment (user chose "remove encryption")
     void Remove(int index);
-
-    // Clear all fragments (file closed)
     void Clear();
 
-    // Get all active fragments
     const std::vector<ManagedFragment>& GetAll() const;
-
-    // Number of active fragments
     int Count() const;
 
-    // Find fragment at a given buffer position
+    // Find fragment (active) at a given buffer position
     int FindAt(int pos) const;
 
-    // Update positions after text insertion/deletion
-    void AdjustPositions(int changePos, int changeLength);
-
-    // Check if a position is inside a managed fragment
     bool IsManaged(int pos) const;
 
 private:
