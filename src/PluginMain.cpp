@@ -93,6 +93,7 @@ static void ClearIndicator(int start, int length) {
 
 static std::string g_dlgPassword;
 static int g_dlgTagCount = 0;
+static bool g_dlgKeepTags = false;
 
 static INT_PTR CALLBACK PasswordDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
@@ -101,6 +102,7 @@ static INT_PTR CALLBACK PasswordDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
         _stprintf_s(label, _T("Encrypted tags found: %d"), g_dlgTagCount);
         SetDlgItemText(hDlg, IDC_TAG_COUNT_LABEL, label);
         CheckRadioButton(hDlg, IDC_MODE_LOCAL, IDC_MODE_OPRF, IDC_MODE_LOCAL);
+        CheckDlgButton(hDlg, IDC_KEEP_TAGS, BST_UNCHECKED);  // default: off
         SetFocus(GetDlgItem(hDlg, IDC_PASSWORD_EDIT));
         return FALSE;
     }
@@ -110,6 +112,7 @@ static INT_PTR CALLBACK PasswordDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
             char buf[512] = {};
             GetDlgItemTextA(hDlg, IDC_PASSWORD_EDIT, buf, sizeof(buf));
             g_dlgPassword = buf;
+            g_dlgKeepTags = (IsDlgButtonChecked(hDlg, IDC_KEEP_TAGS) == BST_CHECKED);
             EndDialog(hDlg, IDOK);
             return TRUE;
         }
@@ -123,105 +126,20 @@ static INT_PTR CALLBACK PasswordDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 }
 
 // Ask for a password. tagCount is shown in the label (0 = generic prompt).
-// Returns empty string if user cancelled.
-static std::string AskPasswordDialog(int tagCount) {
+// Returns empty string if user cancelled. keepTagsOut receives the checkbox state.
+static std::string AskPasswordDialog(int tagCount, bool* keepTagsOut = nullptr) {
     g_dlgTagCount = tagCount;
     g_dlgPassword.clear();
+    g_dlgKeepTags = false;
 
     INT_PTR result = DialogBoxParam(g_hModule, MAKEINTRESOURCE(IDD_PASSWORD_DLG),
                                      g_nppData._nppHandle, PasswordDlgProc, 0);
 
-    if (result == IDOK) return g_dlgPassword;
+    if (result == IDOK) {
+        if (keepTagsOut) *keepTagsOut = g_dlgKeepTags;
+        return g_dlgPassword;
+    }
     return "";
-}
-
-// ============================================================
-//  Close-decision dialog (3 options)
-// ============================================================
-
-enum class CloseChoice { Encrypt, Return, Ignore, Cancelled };
-static CloseChoice g_closeChoice = CloseChoice::Cancelled;
-static int g_closeBlockCount = 0;
-
-static INT_PTR CALLBACK CloseDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
-    case WM_INITDIALOG: {
-        TCHAR label[128];
-        _stprintf_s(label, _T("Decrypted blocks found: %d"), g_closeBlockCount);
-        SetDlgItemText(hDlg, IDC_CLOSE_LABEL, label);
-        return TRUE;
-    }
-    case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case IDC_BTN_ENCRYPT:
-            g_closeChoice = CloseChoice::Encrypt;
-            EndDialog(hDlg, IDOK);
-            return TRUE;
-        case IDC_BTN_RETURN:
-            g_closeChoice = CloseChoice::Return;
-            EndDialog(hDlg, IDOK);
-            return TRUE;
-        case IDC_BTN_IGNORE:
-            g_closeChoice = CloseChoice::Ignore;
-            EndDialog(hDlg, IDOK);
-            return TRUE;
-        }
-        break;
-    }
-    return FALSE;
-}
-
-static CloseChoice AskCloseDecision(int blockCount) {
-    g_closeBlockCount = blockCount;
-    g_closeChoice = CloseChoice::Cancelled;
-
-    DialogBoxParam(g_hModule, MAKEINTRESOURCE(IDD_CLOSE_DLG),
-                    g_nppData._nppHandle, CloseDlgProc, 0);
-
-    return g_closeChoice;
-}
-
-// ============================================================
-//  On file opened — find encrypted tags, ask password once,
-//  decrypt everything that matches
-// ============================================================
-
-static void OnFileOpened() {
-    std::string text = GetAllText();
-    auto encTags = TagParser::FindEncryptedTags(text);
-
-    if (encTags.empty()) return;
-
-    std::string password = AskPasswordDialog((int)encTags.size());
-    if (password.empty()) return;  // user cancelled
-
-    HWND hSci = GetCurrentScintilla();
-    SCI(hSci, SCI_BEGINUNDOACTION);
-
-    int decryptedCount = 0;
-
-    // Process in reverse so earlier positions stay valid
-    for (int i = (int)encTags.size() - 1; i >= 0; i--) {
-        auto& tag = encTags[i];
-        auto result = EncTagsEngine::Decrypt(tag.payload, password);
-
-        if (result.success) {
-            std::string originalTag = "^^" + tag.payload + "^^";
-            ReplaceRange(tag.startPos, tag.endPos, result.plaintext);
-            g_registry.Add(tag.startPos, (int)result.plaintext.size(),
-                          originalTag, result.plaintext, password);
-            SetIndicator(tag.startPos, (int)result.plaintext.size());
-            decryptedCount++;
-        }
-        // Non-matching tags are left as-is — user handles via hotkey
-    }
-
-    SCI(hSci, SCI_ENDUNDOACTION);
-
-    TCHAR status[160];
-    _stprintf_s(status, _T("EncTags: decrypted %d of %d tags"),
-                decryptedCount, (int)encTags.size());
-    ::SendMessage(g_nppData._nppHandle, NPPM_SETSTATUSBAR, STATUSBAR_DOC_TYPE, (LPARAM)status);
 }
 
 // ============================================================
@@ -322,7 +240,8 @@ void cmdToggleAtCursor() {
 
     if (tag.isEncrypted) {
         // Decrypt this single tag
-        std::string password = AskPasswordDialog(0);
+        bool keepTags = false;
+        std::string password = AskPasswordDialog(0, &keepTags);
         if (password.empty()) return;
 
         auto result = EncTagsEngine::Decrypt(tag.payload, password);
@@ -334,14 +253,18 @@ void cmdToggleAtCursor() {
         }
 
         std::string originalTag = "^^" + tag.payload + "^^";
+        std::string displayText = keepTags ? ("^^" + result.plaintext + "^^")
+                                            : result.plaintext;
 
         SCI(hSci, SCI_BEGINUNDOACTION);
-        ReplaceRange(tag.startPos, tag.endPos, result.plaintext);
+        ReplaceRange(tag.startPos, tag.endPos, displayText);
         SCI(hSci, SCI_ENDUNDOACTION);
 
-        g_registry.Add(tag.startPos, (int)result.plaintext.size(),
-                      originalTag, result.plaintext, password);
-        SetIndicator(tag.startPos, (int)result.plaintext.size());
+        if (!keepTags) {
+            g_registry.Add(tag.startPos, (int)displayText.size(),
+                          originalTag, displayText, password);
+            SetIndicator(tag.startPos, (int)displayText.size());
+        }
 
     } else {
         // Encrypt this raw tag's content
@@ -378,64 +301,6 @@ void cmdAbout() {
 }
 
 // ============================================================
-//  Close / Save handling
-// ============================================================
-
-// Returns false if the close/save should be cancelled (user chose "Return")
-static bool HandleCloseOrSave() {
-    int count = g_registry.Count();
-    if (count == 0) return true;  // nothing decrypted, proceed normally
-
-    CloseChoice choice = AskCloseDecision(count);
-
-    switch (choice) {
-    case CloseChoice::Return:
-        return false;  // cancel close/save
-
-    case CloseChoice::Ignore:
-        // Leave everything as plaintext, proceed with close/save
-        g_registry.Clear();
-        return true;
-
-    case CloseChoice::Encrypt: {
-        HWND hSci = GetCurrentScintilla();
-        std::string currentText = GetAllText();
-
-        SCI(hSci, SCI_BEGINUNDOACTION);
-
-        auto& frags = g_registry.GetAll();
-        for (int i = (int)frags.size() - 1; i >= 0; i--) {
-            auto& frag = frags[i];
-            if (!frag.active) continue;
-
-            int fragEnd = frag.startPos + frag.length;
-            if (frag.startPos < 0 || fragEnd > (int)currentText.size()) continue;
-
-            std::string currentFragment = currentText.substr(frag.startPos, frag.length);
-            std::string tagToInsert;
-
-            if (currentFragment == frag.decryptedText) {
-                tagToInsert = frag.originalTag;
-            } else {
-                auto result = EncTagsEngine::Encrypt(currentFragment, frag.password);
-                tagToInsert = result.success ? result.tag : frag.originalTag;
-            }
-
-            ReplaceRange(frag.startPos, fragEnd, tagToInsert);
-        }
-
-        SCI(hSci, SCI_ENDUNDOACTION);
-        g_registry.Clear();
-        return true;
-    }
-
-    case CloseChoice::Cancelled:
-    default:
-        return false;  // dialog dismissed without a choice — treat as cancel
-    }
-}
-
-// ============================================================
 //  DLL exports required by Notepad++
 // ============================================================
 
@@ -469,24 +334,6 @@ extern "C" __declspec(dllexport) FuncItem* getFuncsArray(int* nbF) {
 
 extern "C" __declspec(dllexport) void beNotified(SCNotification* notification) {
     switch (notification->nmhdr.code) {
-    case NPPN_FILEOPENED:
-        OnFileOpened();
-        break;
-
-    case NPPN_FILEBEFORESAVE:
-        // NOTE: Notepad++'s plugin API does not let FILEBEFORESAVE cancel
-        // the save. We resolve decrypted fragments here; if the user
-        // chooses "Return", we simply leave text decrypted (it will be
-        // saved as plaintext) and rely on FILEBEFORECLOSE for true
-        // cancellable behavior when closing the tab.
-        HandleCloseOrSave();
-        break;
-
-    case NPPN_FILEBEFORECLOSE:
-        // Notepad++ does not support cancelling close via this
-        // notification either; treat as best-effort prompt.
-        HandleCloseOrSave();
-        break;
 
     case NPPN_FILECLOSED:
         g_registry.Clear();
