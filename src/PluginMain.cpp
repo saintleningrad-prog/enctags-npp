@@ -228,8 +228,52 @@ static void OnFileOpened() {
 //  Ctrl+Shift+E — toggle the tag under the cursor
 // ============================================================
 
+// Get currently selected text (empty string if nothing selected)
+static std::string GetSelectedText() {
+    HWND hSci = GetCurrentScintilla();
+    int selStart = (int)SCI(hSci, SCI_GETSELECTIONSTART);
+    int selEnd   = (int)SCI(hSci, SCI_GETSELECTIONEND);
+    if (selEnd <= selStart) return "";
+
+    int len = selEnd - selStart;
+    std::string buf(len + 1, '\0');
+    SCI(hSci, SCI_GETSELTEXT, 0, (LPARAM)buf.data());
+    buf.resize(len);
+    return buf;
+}
+
 void cmdToggleAtCursor() {
     HWND hSci = GetCurrentScintilla();
+
+    // Case 0: user has text selected — encrypt the selection directly,
+    // no need to type ^^...^^ manually first
+    std::string selected = GetSelectedText();
+    if (!selected.empty()) {
+        // If the selection already IS an encrypted tag, offer to
+        // re-encrypt (rare, but handled for safety)
+        if (TagParser::IsEncryptedTag(selected)) {
+            int answer = MessageBox(g_nppData._nppHandle,
+                _T("Selection is already an encrypted tag.\nEncrypt again?"),
+                PLUGIN_NAME, MB_YESNO | MB_ICONQUESTION);
+            if (answer != IDYES) return;
+        }
+
+        std::string password = AskPasswordDialog(0);
+        if (password.empty()) return;
+
+        auto result = EncTagsEngine::Encrypt(selected, password);
+        if (!result.success) {
+            MessageBoxA(g_nppData._nppHandle, result.error.c_str(),
+                "EncTags Error", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        SCI(hSci, SCI_BEGINUNDOACTION);
+        SCI(hSci, SCI_REPLACESEL, 0, (LPARAM)result.tag.c_str());
+        SCI(hSci, SCI_ENDUNDOACTION);
+        return;
+    }
+
     int curPos = (int)SCI(hSci, SCI_GETCURRENTPOS);
 
     // Case 1: cursor is inside an already-decrypted (managed) fragment
